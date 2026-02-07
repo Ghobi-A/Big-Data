@@ -1,54 +1,55 @@
-Distributed Image Processing Pipeline (Spark + TensorFlow on GCP)
+# Distributed Image Processing Pipeline (Spark + TensorFlow on GCP)
 
-This project implements a distributed data pipeline that converts large image datasets into TFRecord format using PySpark and TensorFlow on Google Cloud Dataproc. It demonstrates scalable preprocessing, parallel file generation, and throughput benchmarking for machine learning data pipelines.
+This project implements a distributed data pipeline that converts large image datasets into TFRecord format using **PySpark** and **TensorFlow** on Google Cloud Dataproc. It demonstrates scalable preprocessing, parallel file generation, and throughput benchmarking for machine learning data pipelines.
 
 Originally developed as Big Data coursework, the repository has been refactored into a reproducible, portfolio-ready project that highlights distributed computing and data engineering practices.
 
-Key features
+## Key features
 
-Distributed image preprocessing pipeline using PySpark RDDs
+- Distributed image preprocessing pipeline using **PySpark RDDs**
+- Parallel TFRecord generation optimized for downstream ML workloads
+- Google Cloud Storage integration for scalable data access
+- Benchmarking framework comparing raw image reads vs TFRecord reads
+- Modular project structure separating reusable code from notebooks
 
-Parallel TFRecord generation optimised for downstream ML workloads
+## Tech stack
 
-Google Cloud Storage integration for scalable data access
+- Python
+- PySpark
+- TensorFlow
+- Google Cloud Platform (Dataproc + GCS)
+- Jupyter Notebook
 
-Benchmarking framework comparing raw image reads vs TFRecord reads
+## Setup
 
-Modular project structure separating reusable code from notebooks
+1. Create and activate a virtual environment
 
-Tech stack
+2. Install dependencies
 
-Python
-
-PySpark
-
-TensorFlow
-
-Google Cloud Platform (Dataproc + GCS)
-
-Jupyter Notebook
-
-Setup
-
-Create and activate a virtual environment
-
-Install dependencies
-
+```bash
 pip install -r requirements.txt
+```
 
-(Optional) Configure environment variables for GCP execution
+3. (Optional) Configure environment variables for GCP execution
 
+```bash
 export GCP_PROJECT_ID=your-project-id
 export GCS_BUCKET_URI=gs://your-bucket
-Running the pipeline
+```
+
+## Running the pipeline
 
 The Spark TFRecord writer can be executed as a standalone module:
 
+```bash
 python src/spark_tfrecord_writer.py
+```
 
-The full experimental workflow and benchmarking analysis are available in the notebooks directory.
+The full experimental workflow and benchmarking analysis are available in the `notebooks/` directory.
 
-Repository structure
+## Repository structure
+
+```text
 .
 ├── data/
 │   ├── processed/       # Generated datasets and intermediate outputs
@@ -58,10 +59,10 @@ Repository structure
 ├── reports/             # Figures and report assets
 ├── scripts/             # Utility and orchestration scripts
 └── src/                 # Reusable pipeline modules
-Notes
+```
 
-The original coursework notebook is preserved for reference
+## Notes
 
-A sanitized public notebook is included for reproducibility
-
-The focus of this project is scalable data preprocessing rather than model training
+- The original coursework notebook is preserved for reference
+- A sanitized public notebook is included for reproducibility
+- The focus of this project is scalable data preprocessing rather than model training
