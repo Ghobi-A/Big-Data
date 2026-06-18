@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -20,7 +21,9 @@ def _int_feature(list_of_ints: Sequence[int]) -> tf.train.Feature:
 
 
 def to_tfrecord(img_bytes: bytes, label: bytes, classes: Sequence[bytes]) -> tf.train.Example:
-    class_num = int(np.argmax(np.array(classes) == label))
+    # list.index raises ValueError immediately on an unknown label instead of
+    # silently falling through to class 0 the way np.argmax does on all-False.
+    class_num = list(classes).index(label)
     feature = {
         "image": _bytestring_feature([img_bytes]),
         "class": _int_feature([class_num]),
@@ -41,19 +44,22 @@ def resize_and_crop_image(
     target_size: Sequence[int],
 ) -> Tuple[tf.Tensor, tf.Tensor]:
     image, label = input_layer
-    w = tf.shape(image)[0]
-    h = tf.shape(image)[1]
-    tw = target_size[1]
-    th = target_size[0]
-    resize_crit = (w * th) / (h * tw)
+    # TensorFlow stores images as [height, width, channels]: axis 0 is height, axis 1 is width.
+    h = tf.shape(image)[0]
+    w = tf.shape(image)[1]
+    th = target_size[0]  # target height
+    tw = target_size[1]  # target width
+    # "Fill" algorithm: scale by whichever axis needs the larger scale factor so
+    # the image covers the target with no black bars, then centre-crop.
+    # width-binding when tW/W > tH/H  ↔  tW*h > tH*w
     image = tf.cond(
-        resize_crit < 1,
-        lambda: tf.image.resize(image, [w * tw / w, h * tw / w]),
-        lambda: tf.image.resize(image, [w * th / h, h * th / h]),
+        tw * h > th * w,
+        lambda: tf.image.resize(image, [h * tw // w, tw]),   # width-binding
+        lambda: tf.image.resize(image, [th, w * th // h]),   # height-binding
     )
-    nw = tf.shape(image)[0]
-    nh = tf.shape(image)[1]
-    image = tf.image.crop_to_bounding_box(image, (nw - tw) // 2, (nh - th) // 2, tw, th)
+    nh = tf.shape(image)[0]
+    nw = tf.shape(image)[1]
+    image = tf.image.crop_to_bounding_box(image, (nh - th) // 2, (nw - tw) // 2, th, tw)
     return image, label
 
 
@@ -70,7 +76,7 @@ def write_tfrecord_partition(
     gcs_output: str,
     classes: Sequence[bytes],
 ) -> List[str]:
-    tfrecord_filename = f"{gcs_output}{index}.tfrec"
+    tfrecord_filename = f"{gcs_output.rstrip('/')}/{index}.tfrec"
     with tf.io.TFRecordWriter(tfrecord_filename) as tfrecord_file:
         for img, lbl in data_partition:
             example = to_tfrecord(img.numpy(), lbl.numpy(), classes)
@@ -91,18 +97,20 @@ def write_tfrecords_with_spark(
     file_paths = tf.io.gfile.glob(gcs_pattern)
     file_rdd = sc.parallelize(file_paths, partitions)
     sampled = file_rdd.sample(False, sample_rate)
-    decoded = sampled.map(decode_jpeg_and_label)
+    # Repartition file paths (small strings) before decode so the network shuffle
+    # moves path strings rather than decoded image byte-strings.
+    partitioned = sampled.repartition(partitions)
+    decoded = partitioned.map(decode_jpeg_and_label)
     resized = decoded.map(lambda item: resize_and_crop_image(item, target_size))
     recompressed = resized.map(recompress_image)
-    partitioned = recompressed.repartition(partitions)
-    tf_records_rdd = partitioned.mapPartitionsWithIndex(
+    tf_records_rdd = recompressed.mapPartitionsWithIndex(
         lambda index, partition: write_tfrecord_partition(index, partition, gcs_output, classes)
     )
     return tf_records_rdd.collect()
 
 
 if __name__ == "__main__":
-    PROJECT = "big-data-cw2-18002699"
+    PROJECT = os.environ["GCP_PROJECT"]
     GCS_PATTERN = "gs://flowers-public/*/*.jpg"
     BUCKET = f"gs://{PROJECT}-storage"
     GCS_OUTPUT = f"{BUCKET}/tfrecords-jpeg-192x192-2/flowers"
