@@ -5,10 +5,8 @@
 - Canonical archive: `http://download.tensorflow.org/example_images/flower_photos.tgz`
   (published by the TensorFlow team; also available as the `tf_flowers`
   dataset in TensorFlow Datasets).
-- A copy preprocessed into public GCS buckets (`gs://flowers-public/*/*.jpg`)
-  was used in the original coursework via Google's "Fast and Lean Data
-  Science" course material. Availability of that public bucket is not
-  guaranteed; prefer the canonical archive.
+- Prefer the canonical archive as the reproducible source for local and cloud
+  experiments.
 
 ## Size and classes
 

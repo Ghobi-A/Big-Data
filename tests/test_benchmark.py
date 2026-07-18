@@ -10,8 +10,10 @@ from distributed_image_pipeline.benchmark import (  # noqa: E402
     BenchmarkPlan,
     estimate_run_cost,
     run_benchmark,
+    run_io_benchmark,
 )
-from distributed_image_pipeline.config import ClusterCost  # noqa: E402
+from distributed_image_pipeline.config import ClusterCost, PipelineConfig  # noqa: E402
+from distributed_image_pipeline.local_pipeline import run_local_pipeline  # noqa: E402
 
 
 def test_plan_validation():
@@ -19,6 +21,8 @@ def test_plan_validation():
         BenchmarkPlan(input_uri="a", output_uri="b", repeats=0)
     with pytest.raises(ValueError):
         BenchmarkPlan(input_uri="a", output_uri="b", modes=["dask"])
+    with pytest.raises(ValueError, match="local benchmark mode requires"):
+        BenchmarkPlan(input_uri="a", output_uri="gs://bucket/scratch", modes=["local"])
 
 
 def test_estimate_cost_none_without_prices():
@@ -53,10 +57,8 @@ def test_run_benchmark_local_smoke(flowers_dir, tmp_path):
     assert (df["processed_files"] == 20).all()
     assert df["estimated_cost"].isna().all()  # no prices supplied -> null, not invented
     assert df["workers"].isna().all()  # unknown workers stay null
-    # CSV written and re-readable
     on_disk = pd.read_csv(plan.results_csv)
     assert len(on_disk) == 4
-    # per-run reproducibility metadata written
     assert len(list((tmp_path / "meta").glob("*.json"))) == 4
 
 
@@ -94,3 +96,27 @@ def test_sampled_benchmark_labelled(flowers_dir, tmp_path):
     assert df["sampled"].all()
     assert (df["sample_rate"] == 0.5).all()
     assert (df["seed"] == 42).all()
+
+
+def test_io_benchmark_accepts_direct_tfrecord_file(flowers_dir, tmp_path):
+    cfg = PipelineConfig(
+        input_uri=str(flowers_dir),
+        output_uri=str(tmp_path / "tfrecords"),
+        partitions=1,
+        target_height=32,
+        target_width=32,
+    )
+    result = run_local_pipeline(cfg, output_format="tfrecord")
+    assert len(result.output_paths) == 1
+
+    df = run_io_benchmark(
+        jpeg_input=str(flowers_dir),
+        tfrecord_input=result.output_paths[0],
+        batch_size=4,
+        repeats=1,
+        target_size=(32, 32),
+        results_csv=str(tmp_path / "io.csv"),
+    )
+    assert sorted(df.input_format.unique()) == ["jpeg", "tfrecord"]
+    assert (df.samples > 0).all()
+    assert (df.samples_per_second > 0).all()

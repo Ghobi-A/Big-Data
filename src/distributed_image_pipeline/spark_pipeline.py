@@ -2,17 +2,20 @@
 
 Distributes the *same* Pillow-based preprocessing and TFRecord schema as the
 local baseline across Spark partitions. Each partition writes one TFRecord
-shard directly from the executor, so no image data is collected to the driver.
+shard directly from the executor, so no image data is collected to the driver
+or accumulated as a full in-memory partition list.
 
-Design notes relative to the original coursework implementation:
+Design notes relative to the earlier implementation:
 
 - File paths are parallelised straight into ``partitions`` slices; there is no
-  extra ``repartition`` step (the coursework repartitioned after mapping,
-  shuffling full image tensors across the cluster).
+  extra ``repartition`` step that would shuffle full image payloads.
 - Sampling happens deterministically on the driver (sorted files + seeded
   ``random.Random``), not via ``RDD.sample``, so a given (rate, seed) always
   selects the same files in both execution modes.
 - Unknown labels raise instead of silently becoming class 0.
+- Processed examples are streamed into the TFRecord writer as they are produced
+  to keep executor memory bounded by individual records rather than a whole
+  partition's decoded/re-encoded images.
 
 TensorFlow must be importable on executors (TFRecordWriter); on Dataproc use a
 pip initialisation action or a custom image.
@@ -41,6 +44,22 @@ def _read_file_bytes(path: str) -> bytes:
         return f.read()
 
 
+def _remove_empty_shard(path: str) -> None:
+    """Delete an empty shard locally or through TensorFlow's GFile interface."""
+    if path.startswith("gs://"):
+        import tensorflow as tf
+
+        if tf.io.gfile.exists(path):
+            tf.io.gfile.remove(path)
+        return
+
+    from pathlib import Path
+
+    local_path = Path(path)
+    if local_path.exists():
+        local_path.unlink()
+
+
 def _process_partition(
     index: int,
     paths,
@@ -50,30 +69,34 @@ def _process_partition(
     target_width: int,
     error_policy: str,
 ):
-    """Executor-side: preprocess a partition's files and write one shard.
-
-    Yields a single stats dict for the partition.
-    """
+    """Executor-side: preprocess and stream one partition into one TFRecord shard."""
     from .preprocessing import PreprocessingError, ProcessingStats, preprocess_image_bytes
     from .tfrecords import write_tfrecord_shard
 
-    paths = list(paths)
     stats = ProcessingStats()
-    examples = []
-    for path in paths:
-        try:
-            data = _read_file_bytes(path)
-            img = preprocess_image_bytes(data, target_height, target_width)
-            examples.append((img, label_from_path(path), target_height, target_width, path))
-            stats.processed += 1
-        except (PreprocessingError, OSError, ValueError) as exc:
-            stats.record_failure(path, exc, error_policy)
+    sep = "" if output_uri.endswith("/") else "/"
+    shard_path = f"{output_uri}{sep}flowers-{index:03d}.tfrec"
 
-    shard_path = None
-    if examples:
-        sep = "" if output_uri.endswith("/") else "/"
-        shard_path = f"{output_uri}{sep}flowers-{index:03d}.tfrec"
-        write_tfrecord_shard(shard_path, examples, classes)
+    def iter_examples():
+        for path in paths:
+            try:
+                data = _read_file_bytes(path)
+                image = preprocess_image_bytes(data, target_height, target_width)
+                stats.processed += 1
+                yield (
+                    image,
+                    label_from_path(path),
+                    target_height,
+                    target_width,
+                    path,
+                )
+            except (PreprocessingError, OSError, ValueError) as exc:
+                stats.record_failure(path, exc, error_policy)
+
+    written = write_tfrecord_shard(shard_path, iter_examples(), classes)
+    if written == 0:
+        _remove_empty_shard(shard_path)
+        shard_path = None
 
     yield {
         "index": index,
@@ -102,7 +125,10 @@ def run_spark_pipeline(
     if config.is_sampled:
         logger.info(
             "SAMPLED RUN: %d of %d files (rate=%.3f, seed=%d) — not a full-dataset result",
-            len(files), len(all_files), config.sample_rate, config.seed,
+            len(files),
+            len(all_files),
+            config.sample_rate,
+            config.seed,
         )
 
     if not config.output_uri.startswith("gs://"):
@@ -131,7 +157,8 @@ def run_spark_pipeline(
         from pathlib import Path
 
         size_mb = round(
-            sum(Path(p).stat().st_size for p in shards if Path(p).exists()) / 1e6, 3
+            sum(Path(p).stat().st_size for p in shards if Path(p).exists()) / 1e6,
+            3,
         )
 
     result = PipelineRunResult(
@@ -153,7 +180,12 @@ def run_spark_pipeline(
     logger.info(
         "spark pipeline: %d processed, %d failed, %d skipped, %d partitions, "
         "%d shards in %.2fs (%.1f img/s)",
-        processed, failed, skipped, config.partitions, len(shards),
-        runtime, result.throughput_images_per_second,
+        processed,
+        failed,
+        skipped,
+        config.partitions,
+        len(shards),
+        runtime,
+        result.throughput_images_per_second,
     )
     return result

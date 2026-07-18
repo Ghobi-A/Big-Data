@@ -1,10 +1,10 @@
-# Optional, manually triggered cloud benchmark.
+# Optional, manually triggered Spark benchmark against GCS-backed data.
 #
-# This workflow is NEVER run on push/PR. It requires repository secrets:
-#   GCP_SA_KEY          - service-account JSON with Dataproc + GCS access
-#   GCP_PROJECT_ID      - target project
-# and workflow inputs for the run configuration. Standard CI stays fully local.
-name: Cloud benchmark (manual)
+# This workflow runs Spark on the GitHub Actions runner and reads/writes GCS.
+# It is NOT a Dataproc multi-worker benchmark and therefore does not record or
+# claim worker scaling. True Dataproc runs should be submitted from an actual
+# Dataproc environment where worker metadata can be measured directly.
+name: GCS-backed Spark benchmark (manual)
 
 on:
   workflow_dispatch:
@@ -21,15 +21,9 @@ on:
       repeats:
         description: "repeats per configuration"
         default: "5"
-      worker_hourly_cost:
-        description: "hourly cost per worker for cost ESTIMATION (optional)"
-        required: false
-      num_workers:
-        description: "cluster worker count, for scaling metrics (optional)"
-        required: false
 
 jobs:
-  cloud-benchmark:
+  gcs-spark-benchmark:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -37,14 +31,19 @@ jobs:
 
       - name: Fail early when secrets are missing
         run: |
-          if [ -z "${{ secrets.GCP_SA_KEY }}" ] || [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
-            echo "GCP_SA_KEY / GCP_PROJECT_ID secrets are not configured." >&2
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+            echo "GCP_SA_KEY secret is not configured." >&2
             exit 1
           fi
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
       - uses: google-github-actions/auth@v2
         with:
@@ -53,17 +52,8 @@ jobs:
       - name: Install package
         run: pip install -e ".[spark,tensorflow,cloud,stats]"
 
-      - name: Run benchmark against GCS
-        env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      - name: Run local-Spark benchmark against GCS
         run: |
-          EXTRA=""
-          if [ -n "${{ inputs.worker_hourly_cost }}" ]; then
-            EXTRA="$EXTRA --worker-hourly-cost ${{ inputs.worker_hourly_cost }}"
-          fi
-          if [ -n "${{ inputs.num_workers }}" ]; then
-            EXTRA="$EXTRA --num-workers ${{ inputs.num_workers }}"
-          fi
           python -m distributed_image_pipeline.cli benchmark \
             --input "${{ inputs.input_uri }}" \
             --output "${{ inputs.output_uri }}" \
@@ -71,13 +61,12 @@ jobs:
             --partitions ${{ inputs.partitions }} \
             --repeats ${{ inputs.repeats }} \
             --results reports/tables/benchmark_runs.csv \
-            --summary reports/tables/benchmark_summary.csv \
-            $EXTRA
+            --summary reports/tables/benchmark_summary.csv
 
-      - name: Upload results
+      - name: Upload measured benchmark metadata
         uses: actions/upload-artifact@v4
         with:
-          name: cloud-benchmark-results
+          name: gcs-spark-benchmark-results
           path: |
             reports/tables/
             reports/run_metadata/
