@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+
+# Data and generated artefacts (regenerate via the CLI)
+data/raw/*
+data/processed/*
+data/splits/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+smoke/
+*.tfrec
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Spark
+spark-warehouse/
+derby.log
+metastore_db/
+
+# OS
+.DS_Store

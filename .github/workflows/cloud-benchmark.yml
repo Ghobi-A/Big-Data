@@ -1,0 +1,83 @@
+# Optional, manually triggered cloud benchmark.
+#
+# This workflow is NEVER run on push/PR. It requires repository secrets:
+#   GCP_SA_KEY          - service-account JSON with Dataproc + GCS access
+#   GCP_PROJECT_ID      - target project
+# and workflow inputs for the run configuration. Standard CI stays fully local.
+name: Cloud benchmark (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_uri:
+        description: "GCS glob of input JPEGs (e.g. gs://bucket/flowers/*/*.jpg)"
+        required: true
+      output_uri:
+        description: "GCS output prefix for benchmark scratch data"
+        required: true
+      partitions:
+        description: "space-separated partition counts"
+        default: "1 2 4 8"
+      repeats:
+        description: "repeats per configuration"
+        default: "5"
+      worker_hourly_cost:
+        description: "hourly cost per worker for cost ESTIMATION (optional)"
+        required: false
+      num_workers:
+        description: "cluster worker count, for scaling metrics (optional)"
+        required: false
+
+jobs:
+  cloud-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail early when secrets are missing
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ] || [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
+            echo "GCP_SA_KEY / GCP_PROJECT_ID secrets are not configured." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Install package
+        run: pip install -e ".[spark,tensorflow,cloud,stats]"
+
+      - name: Run benchmark against GCS
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          EXTRA=""
+          if [ -n "${{ inputs.worker_hourly_cost }}" ]; then
+            EXTRA="$EXTRA --worker-hourly-cost ${{ inputs.worker_hourly_cost }}"
+          fi
+          if [ -n "${{ inputs.num_workers }}" ]; then
+            EXTRA="$EXTRA --num-workers ${{ inputs.num_workers }}"
+          fi
+          python -m distributed_image_pipeline.cli benchmark \
+            --input "${{ inputs.input_uri }}" \
+            --output "${{ inputs.output_uri }}" \
+            --modes spark \
+            --partitions ${{ inputs.partitions }} \
+            --repeats ${{ inputs.repeats }} \
+            --results reports/tables/benchmark_runs.csv \
+            --summary reports/tables/benchmark_summary.csv \
+            $EXTRA
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-benchmark-results
+          path: |
+            reports/tables/
+            reports/run_metadata/
