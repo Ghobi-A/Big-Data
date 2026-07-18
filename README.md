@@ -11,8 +11,8 @@ The committed benchmark results were produced on a GitHub Actions runner using t
 - **Best preprocessing configuration:** local-mode PySpark with 8 partitions, **1,109.6 images/s** mean throughput and **3.31s** mean runtime.
 - **Best local baseline:** 2 partitions, **486.8 images/s** mean throughput.
 - **Best Spark throughput advantage:** **2.28×** over the strongest local baseline in the tested environment.
-- **TFRecord input throughput:** **9,978.1 samples/s** vs **2,179.1 samples/s** for raw JPEG, a **4.58×** increase.
-- **Mean CNN epoch time:** **8.68s** with JPEG vs **8.54s** with TFRecord. The large standalone I/O gain translated into only a modest end-to-end training-time improvement, indicating model computation remained a substantial bottleneck.
+- **TFRecord input throughput:** **9,978.1 samples/s** vs **2,179.1 samples/s** for raw JPEG on average across 5 repeats, a **4.58× mean** increase. JPEG throughput varied substantially between repeats (roughly 1,430–2,690 samples/s), so the mean gain should be read alongside that spread; TFRecord throughput was highly stable.
+- **Mean CNN epoch time:** **8.68s** with JPEG vs **8.54s** with TFRecord, averaged over the 3 epochs of a single seeded training run per input format (not repeated independent training experiments). The large standalone I/O gain translated into only a modest end-to-end training-time improvement, indicating model computation remained a substantial bottleneck.
 - **Failed files:** 0 across the recorded preprocessing benchmark runs.
 
 These Spark figures measure **partition scaling on one GitHub Actions runner**, not multi-worker Dataproc scaling.
