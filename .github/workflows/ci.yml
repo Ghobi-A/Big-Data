@@ -75,7 +75,7 @@ jobs:
         run: |
           python -m distributed_image_pipeline.cli train \
             --jpeg-input smoke/flowers --tfrecord-input smoke/out-local \
-            --epochs 1 --batch-size 4 --target-size 32 32 \
+            --epochs 1 --batch-size 4 --target-size 48 48 \
             --splits-dir smoke/splits --results smoke/training_runs.csv
 
       - name: Dashboard smoke test (non-interactive)
