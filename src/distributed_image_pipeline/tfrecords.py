@@ -9,9 +9,12 @@ Feature          Type            Description
 ``class``        int64 (1)       integer class ID (index into class list)
 ``height``       int64 (1)       image height in pixels
 ``width``        int64 (1)       image width in pixels
-``basename``     bytes (1)       original file basename only — directory
-                                 components are stripped so no personal
-                                 filesystem paths leak into records
+``source``       bytes (1)       class-relative source path, i.e. the last
+                                 two path components ``<label>/<basename>``.
+                                 All other directory components are stripped
+                                 so no personal filesystem paths leak into
+                                 records; the pair is unique per example and
+                                 keys the train/validation split manifests
 ===============  ==============  =======================================
 
 TensorFlow is imported lazily so the rest of the package works without it.
@@ -19,7 +22,6 @@ TensorFlow is imported lazily so the rest of the package works without it.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable, Sequence
 
 from .labels import label_to_index, validate_classes
@@ -29,6 +31,12 @@ def _tf():
     import tensorflow as tf
 
     return tf
+
+
+def source_key(path: str) -> str:
+    """Class-relative source key: the last two path components."""
+    parts = [p for p in path.replace("\\", "/").split("/") if p]
+    return "/".join(parts[-2:])
 
 
 def serialize_example(
@@ -45,14 +53,14 @@ def serialize_example(
     """
     tf = _tf()
     class_id = label_to_index(label, classes)
-    basename = os.path.basename(source_name) if source_name else ""
+    source = source_key(source_name) if source_name else ""
     feature = {
         "image": tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_bytes])),
         "class": tf.train.Feature(int64_list=tf.train.Int64List(value=[class_id])),
         "height": tf.train.Feature(int64_list=tf.train.Int64List(value=[height])),
         "width": tf.train.Feature(int64_list=tf.train.Int64List(value=[width])),
-        "basename": tf.train.Feature(
-            bytes_list=tf.train.BytesList(value=[basename.encode("utf-8")])
+        "source": tf.train.Feature(
+            bytes_list=tf.train.BytesList(value=[source.encode("utf-8")])
         ),
     }
     example = tf.train.Example(features=tf.train.Features(feature=feature))
@@ -67,7 +75,7 @@ def parse_example(serialized) -> dict:
         "class": tf.io.FixedLenFeature([], tf.int64),
         "height": tf.io.FixedLenFeature([], tf.int64),
         "width": tf.io.FixedLenFeature([], tf.int64),
-        "basename": tf.io.FixedLenFeature([], tf.string, default_value=""),
+        "source": tf.io.FixedLenFeature([], tf.string, default_value=""),
     }
     return tf.io.parse_single_example(serialized, spec)
 

@@ -22,7 +22,7 @@ def test_serialize_parse_roundtrip():
     parsed = parse_example(raw)
     assert parsed["class"].numpy() == 2
     assert parsed["height"].numpy() == 192
-    assert parsed["basename"].numpy() == b"x.jpg"  # no directory components leaked
+    assert parsed["source"].numpy() == b"roses/x.jpg"  # only label/basename, no personal paths
     image, label = parse_image_and_label(raw)
     assert image.shape == (192, 192, 3)
     assert int(label.numpy()) == 2
