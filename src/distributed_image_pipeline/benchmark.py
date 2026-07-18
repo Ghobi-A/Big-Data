@@ -19,6 +19,7 @@ import pandas as pd
 
 from .config import ClusterCost, PipelineConfig
 from .results import collect_environment_metadata, git_commit_sha, write_run_metadata
+from .tf_input import list_tfrecord_files, load_and_preprocess_jpeg
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,11 @@ def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
                     )
                     logger.info(
                         "benchmark run %s: mode=%s partitions=%d sample_rate=%.3f repeat=%d",
-                        run_id, mode, partitions, sample_rate, repeat,
+                        run_id,
+                        mode,
+                        partitions,
+                        sample_rate,
+                        repeat,
                     )
                     result = _run_once(mode, config)
                     est_cost, est_cost_1k = estimate_run_cost(
@@ -167,10 +172,11 @@ def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
                     })
                     if plan.metadata_dir:
                         write_run_metadata(
-                            plan.metadata_dir, run_id,
+                            plan.metadata_dir,
+                            run_id,
                             extra={"benchmark_row": rows[-1]},
                         )
-                    # benchmark outputs are scratch data; clean up local shards
+                    # Benchmark outputs are scratch data; clean up local shards.
                     if out_dir.exists():
                         shutil.rmtree(out_dir, ignore_errors=True)
 
@@ -190,12 +196,14 @@ def run_io_benchmark(
     target_size: tuple[int, int] = (192, 192),
     results_csv: str = "reports/tables/io_benchmark_runs.csv",
 ) -> pd.DataFrame:
-    """Compare tf.data input throughput: raw JPEG decode+resize vs TFRecord parse.
+    """Compare raw-JPEG and TFRecord input throughput on equivalent image geometry.
 
-    Both paths yield batched uint8 image tensors of ``target_size`` so the
-    comparison is like-for-like: the JPEG path pays decode+resize per epoch,
-    the TFRecord path reads already-preprocessed images (that preprocessing
-    cost is measured separately by the preprocessing benchmark).
+    The raw-JPEG path pays JPEG decode plus the same aspect-preserving resize
+    and centre-crop geometry used to create the TFRecords. The TFRecord path
+    reads images that have already undergone that preprocessing. Both paths
+    therefore yield tensors of the same target shape, making the measured
+    difference attributable to input/preprocessing strategy rather than a
+    different resize operation.
     """
     import tensorflow as tf
 
@@ -210,23 +218,15 @@ def run_io_benchmark(
             raise FileNotFoundError(f"no JPEGs under {jpeg_input!r}")
 
         def load(path):
-            img = tf.io.decode_jpeg(tf.io.read_file(path), channels=3)
-            img = tf.image.resize(img, [th, tw])
-            return tf.cast(img, tf.uint8)
+            image = load_and_preprocess_jpeg(path, target_size)
+            return tf.cast(image, tf.uint8)
 
         return tf.data.Dataset.from_tensor_slices(files).map(
             load, num_parallel_calls=tf.data.AUTOTUNE
         )
 
     def tfrecord_dataset():
-        shards = list_image_files(tfrecord_input) if tfrecord_input.endswith(
-            (".tfrec", ".tfrecord")
-        ) else None
-        if shards is None:
-            p = Path(tfrecord_input)
-            shards = sorted(str(f) for f in p.rglob("*.tfrec")) if p.is_dir() else sorted(
-                tf.io.gfile.glob(tfrecord_input)
-            )
+        shards = list_tfrecord_files(tfrecord_input)
         if not shards:
             raise FileNotFoundError(f"no TFRecord shards under {tfrecord_input!r}")
         ds = tf.data.TFRecordDataset(shards, num_parallel_reads=tf.data.AUTOTUNE)
@@ -268,7 +268,11 @@ def run_io_benchmark(
             })
             logger.info(
                 "io benchmark %s repeat %d: %d samples in %.2fs (%.1f samples/s)",
-                fmt, repeat, n_samples, epoch_time, rows[-1]["samples_per_second"],
+                fmt,
+                repeat,
+                n_samples,
+                epoch_time,
+                rows[-1]["samples_per_second"],
             )
 
     df = pd.DataFrame(rows)
