@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from metrics import (  # noqa: E402
+    DashboardDataError,
+    best_mode_row,
+    epoch_delta_pct,
+    failed_file_stats,
+    io_format_mean,
+    io_speedup,
+    throughput_speedup,
+    training_format_row,
+    training_summary_table,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLES_DIR = ROOT / "reports" / "tables"
@@ -55,38 +69,37 @@ if missing:
     )
     st.stop()
 
-best_spark = summary_df[summary_df["execution_mode"] == "spark"].sort_values(
-    "throughput_mean_ips", ascending=False
-).iloc[0]
-best_local = summary_df[summary_df["execution_mode"] == "local"].sort_values(
-    "throughput_mean_ips", ascending=False
-).iloc[0]
-spark_speedup = best_spark["throughput_mean_ips"] / best_local["throughput_mean_ips"]
+try:
+    best_spark = best_mode_row(summary_df, "spark")
+    best_local = best_mode_row(summary_df, "local")
+    spark_speedup = throughput_speedup(best_spark, best_local)
 
-io_means = io_df.groupby("input_format", as_index=True)["samples_per_second"].mean()
-jpeg_io = float(io_means.get("jpeg", float("nan")))
-tfrecord_io = float(io_means.get("tfrecord", float("nan")))
-io_speedup = tfrecord_io / jpeg_io
+    jpeg_io = io_format_mean(io_df, "jpeg")
+    tfrecord_io = io_format_mean(io_df, "tfrecord")
+    io_gain = io_speedup(jpeg_io, tfrecord_io)
 
-training_summary = (
-    training_df.groupby("input_format", as_index=False)
-    .agg(
-        mean_epoch_s=("training_time_seconds", "mean"),
-        total_s=("training_time_seconds", "sum"),
-        mean_samples_per_second=("samples_per_second", "mean"),
+    training_summary = training_summary_table(training_df)
+    jpeg_train = training_format_row(training_summary, "jpeg")
+    tf_train = training_format_row(training_summary, "tfrecord")
+    epoch_delta = epoch_delta_pct(jpeg_train, tf_train)
+
+    if "dataset_size" not in summary_df.columns:
+        raise DashboardDataError("The benchmark summary is missing the dataset_size column.")
+    processed_images = int(summary_df["dataset_size"].max())
+    failed_files_total_events, failed_files_worst_run = failed_file_stats(runs_df)
+    best_partitions = int(best_spark["partitions"])
+except DashboardDataError as exc:
+    st.error(
+        f"Committed benchmark results are malformed or incomplete: {exc} "
+        "Re-run the full benchmark workflow and commit the regenerated CSVs "
+        "under reports/tables/."
     )
-)
-final_accuracy = (
-    training_df.sort_values("epoch")
-    .groupby("input_format", as_index=False)
-    .tail(1)[["input_format", "validation_accuracy"]]
-)
-training_summary = training_summary.merge(final_accuracy, on="input_format", how="left")
+    st.stop()
 
-processed_images = int(summary_df["dataset_size"].max())
-failed_files = int(runs_df["failed_files"].sum())
-best_partitions = int(best_spark["partitions"])
-commit_sha = str(runs_df["git_commit"].dropna().iloc[0]) if runs_df["git_commit"].notna().any() else "unknown"
+if "git_commit" in runs_df.columns and runs_df["git_commit"].notna().any():
+    commit_sha = str(runs_df["git_commit"].dropna().iloc[0])
+else:
+    commit_sha = "unknown"
 
 st.title("Distributed Image ML Benchmark")
 st.caption(
@@ -126,9 +139,17 @@ with overview_tab:
     k1.metric("Images processed", f"{processed_images:,}")
     k2.metric("Best throughput", f"{best_spark['throughput_mean_ips']:,.0f} img/s")
     k3.metric("Spark throughput gain", f"{spark_speedup:.2f}×")
-    k4.metric("TFRecord I/O gain", f"{io_speedup:.2f}×")
+    k4.metric("TFRecord I/O gain", f"{io_gain:.2f}×")
     k5.metric("Best Spark partitions", f"{best_partitions}")
-    k6.metric("Failed files", f"{failed_files}")
+    k6.metric(
+        "Failed files (worst run)",
+        f"{failed_files_worst_run}",
+        help=(
+            "Highest failed-file count in any single run. Repeats reprocess the same "
+            f"inputs, so the {failed_files_total_events} total failure events across all "
+            "runs are not distinct files."
+        ),
+    )
 
     st.subheader("Key findings")
     st.markdown(
@@ -140,7 +161,9 @@ with overview_tab:
   giving the best Spark configuration a **{spark_speedup:.2f}× throughput advantage** in this
   GitHub Actions environment.
 - TFRecord delivered **{tfrecord_io:,.1f} samples/s** versus **{jpeg_io:,.1f} samples/s** for
-  raw JPEG input, a **{io_speedup:.2f}× input-pipeline throughput increase**.
+  raw JPEG input, a **{io_gain:.2f}× mean input-pipeline throughput increase**. JPEG throughput
+  varied noticeably between repeats, so the mean gain should be read alongside the per-repeat
+  spread shown in the JPEG vs TFRecord tab.
 - The much larger I/O improvement translated into only a modest difference in end-to-end CNN
   epoch time, indicating that model computation remained a substantial bottleneck.
         """
@@ -165,7 +188,7 @@ with overview_tab:
         },
         title="Preprocessing throughput by partition count",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 with preprocessing_tab:
     st.subheader("Local vs PySpark preprocessing")
@@ -203,7 +226,7 @@ with preprocessing_tab:
             },
             title="Runtime vs partitions",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with c2:
         fig = px.line(
@@ -220,7 +243,7 @@ with preprocessing_tab:
             },
             title="Throughput vs partitions",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     run_filter = runs_df[
         runs_df["execution_mode"].isin(selected_modes)
@@ -240,11 +263,11 @@ with preprocessing_tab:
         labels={"configuration": "Configuration", "runtime_seconds": "Runtime (s)"},
         title="Repeated-run runtime variability",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.dataframe(
         filtered_summary.sort_values(["execution_mode", "partitions"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -263,7 +286,7 @@ with io_tab:
     a, b, c = st.columns(3)
     a.metric("JPEG input throughput", f"{jpeg_io:,.0f} samples/s")
     b.metric("TFRecord input throughput", f"{tfrecord_io:,.0f} samples/s")
-    c.metric("Relative improvement", f"{io_speedup:.2f}×")
+    c.metric("Relative improvement (mean)", f"{io_gain:.2f}×")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -278,7 +301,7 @@ with io_tab:
             },
             title="Input throughput",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with c2:
         fig = px.box(
@@ -292,17 +315,18 @@ with io_tab:
             },
             title="Full-dataset iteration time across repeats",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     st.markdown(
-        "**Interpretation:** TFRecord substantially increased standalone input-pipeline throughput. "
-        "The downstream training experiment shows whether that I/O improvement materially reduces "
+        "**Interpretation:** TFRecord substantially increased standalone input-pipeline "
+        "throughput on average, though JPEG timings vary noticeably between repeats. The "
+        "downstream training experiment shows whether that I/O improvement materially reduces "
         "end-to-end training time once CNN computation is included."
     )
 
 with training_tab:
     st.subheader("Downstream TensorFlow training comparison")
-    st.dataframe(training_summary, use_container_width=True, hide_index=True)
+    st.dataframe(training_summary, width="stretch", hide_index=True)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -319,7 +343,7 @@ with training_tab:
             },
             title="Training time by epoch",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with c2:
         fig = px.line(
@@ -335,19 +359,15 @@ with training_tab:
             },
             title="Validation accuracy by epoch",
         )
-        st.plotly_chart(fig, use_container_width=True)
-
-    jpeg_train = training_summary[training_summary["input_format"] == "jpeg"].iloc[0]
-    tf_train = training_summary[training_summary["input_format"] == "tfrecord"].iloc[0]
-    epoch_delta_pct = (
-        (jpeg_train["mean_epoch_s"] - tf_train["mean_epoch_s"]) / jpeg_train["mean_epoch_s"] * 100
-    )
+        st.plotly_chart(fig, width="stretch")
 
     st.info(
         f"Mean epoch time changed from {jpeg_train['mean_epoch_s']:.2f}s with JPEG to "
-        f"{tf_train['mean_epoch_s']:.2f}s with TFRecord ({epoch_delta_pct:.1f}% faster on average). "
-        "Validation accuracy is shown as a sanity check rather than evidence that TFRecord improves "
-        "predictive performance."
+        f"{tf_train['mean_epoch_s']:.2f}s with TFRecord ({epoch_delta:.1f}% faster on "
+        "average). This is a mean across epochs of a single seeded training run per input "
+        "format, not across repeated independent training experiments. Validation accuracy "
+        "is shown as a sanity check rather than evidence that TFRecord improves predictive "
+        "performance."
     )
 
 with explorer_tab:
@@ -360,7 +380,7 @@ with explorer_tab:
     }
     selected_name = st.selectbox("Dataset", list(datasets))
     selected_df = datasets[selected_name]
-    st.dataframe(selected_df, use_container_width=True, hide_index=True)
+    st.dataframe(selected_df, width="stretch", hide_index=True)
     st.download_button(
         "Download CSV",
         data=selected_df.to_csv(index=False).encode("utf-8"),

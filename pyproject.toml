@@ -42,6 +42,11 @@ stats = [
     "scipy>=1.11",
     "matplotlib>=3.7",
 ]
+dashboard = [
+    # Keep in sync with requirements.txt (used by Streamlit Community Cloud).
+    "streamlit>=1.35,<2",
+    "plotly>=5.20,<7",
+]
 
 [project.scripts]
 dip = "distributed_image_pipeline.cli:main"

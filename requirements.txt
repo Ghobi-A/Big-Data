@@ -1,3 +1,5 @@
+# Streamlit Community Cloud dependencies for dashboard/app.py.
+# Keep in sync with the "dashboard" extra in pyproject.toml.
 streamlit>=1.35,<2
 pandas>=2.0,<3
 plotly>=5.20,<7

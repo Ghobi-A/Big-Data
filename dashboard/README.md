@@ -5,9 +5,12 @@ The recruiter-facing dashboard reads the committed measured benchmark CSVs under
 ## Run locally
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt   # or: pip install -e ".[dashboard]"
 streamlit run dashboard/app.py
 ```
+
+`requirements.txt` exists for Streamlit Community Cloud; the same dependencies are
+available as the `dashboard` extra in `pyproject.toml` and are kept in sync.
 
 ## Deploy on Streamlit Community Cloud
 

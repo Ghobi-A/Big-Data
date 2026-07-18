@@ -1,6 +1,5 @@
 import pytest
 
-
 tf = pytest.importorskip("tensorflow")
 pytestmark = pytest.mark.tf
 
