@@ -4,6 +4,12 @@ The classifier is deliberately small — the question is whether the input
 format changes training throughput, not model accuracy. Both pipelines use
 the same split, model, seed, optimiser, batch size and epoch count.
 
+The raw-JPEG path applies the same geometric preprocessing semantics used when
+TFRecords are created: RGB decode, aspect-preserving resize, then centre-crop.
+The TFRecord path reads the already-preprocessed image. This keeps the
+comparison focused on storage/input strategy rather than different image
+transformations.
+
 Split leakage safety: the train/validation split is derived from the *source
 JPEG file list* (deterministic, stratified by class) and persisted as CSV
 manifests. The TFRecord pipeline filters records by their stored ``source``
@@ -23,6 +29,7 @@ import pandas as pd
 
 from .labels import DEFAULT_CLASSES, label_from_path, label_to_index, validate_classes
 from .local_pipeline import list_image_files
+from .tf_input import list_tfrecord_files, load_and_preprocess_jpeg
 from .tfrecords import source_key
 
 logger = logging.getLogger(__name__)
@@ -119,12 +126,9 @@ def build_model(num_classes: int, target_size: tuple[int, int], seed: int):
 def _jpeg_dataset(df: pd.DataFrame, target_size, batch_size, shuffle, seed):
     import tensorflow as tf
 
-    h, w = target_size
-
     def load(path, label):
-        img = tf.io.decode_jpeg(tf.io.read_file(path), channels=3)
-        img = tf.image.resize(img, [h, w])
-        return img, label
+        image = load_and_preprocess_jpeg(path, target_size)
+        return tf.cast(image, tf.float32), label
 
     ds = tf.data.Dataset.from_tensor_slices(
         (df["path"].tolist(), df["class_id"].tolist())
@@ -153,7 +157,7 @@ def _tfrecord_dataset(shards, manifest: pd.DataFrame, target_size, batch_size, s
     def to_pair(serialized):
         features = parse_example(serialized)
         img = tf.io.decode_jpeg(features["image"], channels=3)
-        img = tf.cast(tf.image.resize(img, [h, w]), tf.float32)
+        img = tf.cast(tf.ensure_shape(img, [h, w, 3]), tf.float32)
         return img, features["class"]
 
     ds = tf.data.TFRecordDataset(shards, num_parallel_reads=tf.data.AUTOTUNE).filter(in_manifest)
@@ -164,15 +168,6 @@ def _tfrecord_dataset(shards, manifest: pd.DataFrame, target_size, batch_size, s
         .batch(batch_size)
         .prefetch(tf.data.AUTOTUNE)
     )
-
-
-def _list_shards(tfrecord_input: str) -> list[str]:
-    p = Path(tfrecord_input)
-    if p.is_dir():
-        return sorted(str(f) for f in p.rglob("*.tfrec"))
-    import glob
-
-    return sorted(glob.glob(tfrecord_input))
 
 
 class _EpochTimer:
@@ -206,7 +201,7 @@ def train_one_format(
         train_ds = _jpeg_dataset(train_df, spec.target_size, spec.batch_size, True, spec.seed)
         val_ds = _jpeg_dataset(val_df, spec.target_size, spec.batch_size, False, spec.seed)
     elif input_format == "tfrecord":
-        shards = _list_shards(spec.tfrecord_input)
+        shards = list_tfrecord_files(spec.tfrecord_input)
         if not shards:
             raise FileNotFoundError(f"no TFRecord shards under {spec.tfrecord_input!r}")
         train_ds = _tfrecord_dataset(
