@@ -30,3 +30,6 @@ metastore_db/
 
 # OS
 .DS_Store
+
+__pycache__/
+*.pyc
