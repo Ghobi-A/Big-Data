@@ -76,6 +76,8 @@ class BenchmarkPlan:
         bad = [m for m in self.modes if m not in ("local", "spark")]
         if bad:
             raise ValueError(f"unknown modes: {bad}")
+        if self.output_uri.startswith("gs://") and "local" in self.modes:
+            raise ValueError("local benchmark mode requires a local scratch output path")
 
 
 def estimate_run_cost(
@@ -104,6 +106,13 @@ def _run_once(mode: str, config: PipelineConfig):
     return run_spark_pipeline(config)
 
 
+def _run_output_uri(root: str, suffix: str) -> str:
+    """Join a benchmark scratch root without corrupting ``gs://`` URIs."""
+    if root.startswith("gs://"):
+        return f"{root.rstrip('/')}/{suffix}"
+    return str(Path(root) / suffix)
+
+
 def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
     """Execute the benchmark grid and append rows to ``plan.results_csv``."""
     cluster_cost = None
@@ -117,16 +126,16 @@ def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
 
     git_sha = git_commit_sha()
     rows = []
-    scratch = Path(plan.output_uri)
     for mode in plan.modes:
         for partitions in plan.partitions:
             for sample_rate in plan.sample_rates:
                 for repeat in range(plan.repeats):
                     run_id = uuid.uuid4().hex[:12]
-                    out_dir = scratch / f"{mode}-p{partitions}-r{repeat}-{run_id}"
+                    suffix = f"{mode}-p{partitions}-r{repeat}-{run_id}"
+                    out_dir = _run_output_uri(plan.output_uri, suffix)
                     config = PipelineConfig(
                         input_uri=plan.input_uri,
-                        output_uri=str(out_dir),
+                        output_uri=out_dir,
                         partitions=partitions,
                         sample_rate=sample_rate,
                         target_height=plan.target_height,
@@ -176,9 +185,12 @@ def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
                             run_id,
                             extra={"benchmark_row": rows[-1]},
                         )
-                    # Benchmark outputs are scratch data; clean up local shards.
-                    if out_dir.exists():
-                        shutil.rmtree(out_dir, ignore_errors=True)
+                    # Benchmark outputs are scratch data. Local outputs are removed
+                    # immediately; GCS scratch cleanup is left to the caller/workflow.
+                    if not out_dir.startswith("gs://"):
+                        local_out = Path(out_dir)
+                        if local_out.exists():
+                            shutil.rmtree(local_out, ignore_errors=True)
 
     df = pd.DataFrame(rows, columns=RUN_COLUMNS)
     results_path = Path(plan.results_csv)
@@ -222,7 +234,8 @@ def run_io_benchmark(
             return tf.cast(image, tf.uint8)
 
         return tf.data.Dataset.from_tensor_slices(files).map(
-            load, num_parallel_calls=tf.data.AUTOTUNE
+            load,
+            num_parallel_calls=tf.data.AUTOTUNE,
         )
 
     def tfrecord_dataset():
