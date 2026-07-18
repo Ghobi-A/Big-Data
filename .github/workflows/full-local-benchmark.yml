@@ -1,0 +1,106 @@
+name: Full local benchmark (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: "Repeats per preprocessing and I/O configuration"
+        default: "5"
+        required: true
+      epochs:
+        description: "Training epochs per input format"
+        default: "3"
+        required: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[spark,tensorflow,dev,stats]"
+
+      - name: Download canonical flowers dataset
+        run: |
+          mkdir -p data/raw
+          curl --fail --location --retry 3 \
+            https://download.tensorflow.org/example_images/flower_photos.tgz \
+            --output /tmp/flower_photos.tgz
+          tar -xzf /tmp/flower_photos.tgz -C data/raw
+
+      - name: Build TFRecord dataset
+        run: |
+          python -m distributed_image_pipeline.cli preprocess-local \
+            --input data/raw/flower_photos \
+            --output data/processed/tfrecords \
+            --target-size 192 192 \
+            --partitions 8
+
+      - name: Run repeated local and local-Spark preprocessing benchmarks
+        run: |
+          python -m distributed_image_pipeline.cli benchmark \
+            --input data/raw/flower_photos \
+            --output /tmp/bench-scratch \
+            --modes local spark \
+            --partitions 1 2 4 8 \
+            --repeats "${{ inputs.repeats }}" \
+            --target-size 192 192 \
+            --results reports/tables/benchmark_runs.csv \
+            --summary reports/tables/benchmark_summary.csv \
+            --metadata-dir reports/run_metadata
+
+      - name: Run JPEG vs TFRecord I/O benchmark
+        run: |
+          python -m distributed_image_pipeline.cli io-benchmark \
+            --jpeg-input data/raw/flower_photos \
+            --tfrecord-input data/processed/tfrecords \
+            --repeats "${{ inputs.repeats }}" \
+            --target-size 192 192 \
+            --results reports/tables/io_benchmark_runs.csv
+
+      - name: Run downstream training comparison
+        run: |
+          python -m distributed_image_pipeline.cli train \
+            --jpeg-input data/raw/flower_photos \
+            --tfrecord-input data/processed/tfrecords \
+            --epochs "${{ inputs.epochs }}" \
+            --batch-size 32 \
+            --target-size 192 192 \
+            --splits-dir data/splits \
+            --results reports/tables/training_runs.csv
+
+      - name: Generate report and figures
+        run: |
+          python -m distributed_image_pipeline.cli report \
+            --input reports/tables/benchmark_runs.csv \
+            --output reports/benchmark_report.md \
+            --training-csv reports/tables/training_runs.csv \
+            --io-csv reports/tables/io_benchmark_runs.csv \
+            --figures-dir reports/figures
+
+      - name: Upload measured benchmark artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-local-benchmark-results
+          path: |
+            reports/benchmark_report.md
+            reports/tables/
+            reports/figures/
+            reports/run_metadata/
+            data/splits/
