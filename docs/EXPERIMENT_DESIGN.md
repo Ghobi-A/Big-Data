@@ -22,9 +22,37 @@ image-based machine-learning pipeline?
 
 Single-process local preprocessing (`preprocess-local`): read JPEG → decode →
 RGB convert → aspect-preserving resize → centre-crop → re-encode → TFRecord
-shard. The Spark pipeline uses the *same* preprocessing function, label
-mapping, deterministic sampling and output schema, differing only in
-execution engine.
+shard. The Spark pipeline uses the same preprocessing function, label mapping,
+deterministic sampling and output schema, differing only in execution engine.
+
+## I/O comparison fairness
+
+The raw-JPEG and TFRecord input benchmarks must produce equivalent target image
+geometry.
+
+- Raw JPEG: decode RGB → aspect-preserving resize → centre-crop → batch.
+- TFRecord: read preprocessed record → decode → batch.
+
+This intentionally measures the effect of input/preprocessing strategy rather
+than comparing TFRecord against a raw-JPEG path using a different direct-stretch
+resize. The image libraries used at different pipeline stages are not expected
+to produce byte-identical tensors; the controlled variable is the geometric
+transformation and final tensor shape.
+
+## Training comparison fairness
+
+Both input formats use:
+
+- the same deterministic train/validation split manifests,
+- the same model architecture,
+- the same random seed,
+- the same optimiser,
+- the same batch size,
+- the same target image size,
+- the same number of epochs.
+
+The TFRecord manifests are matched through the stored source key so the same
+examples are assigned to train and validation for both formats.
 
 ## Variables
 
