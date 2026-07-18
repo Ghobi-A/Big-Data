@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "distributed-image-ml-pipeline"
+version = "0.1.0"
+description = "Distributed PySpark + TensorFlow image preprocessing pipeline benchmarking Spark, TFRecord and GCP Dataproc performance for ML workloads."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Ghobi A." }]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+spark = [
+    "pyspark>=3.4,<4.0",
+]
+tensorflow = [
+    # tensorflow-cpu is not published for macOS arm64; see README "Installation"
+    # for the documented alternative (plain `tensorflow`) on that platform.
+    "tensorflow-cpu>=2.13,<2.20; sys_platform != 'darwin'",
+    "tensorflow>=2.13,<2.20; sys_platform == 'darwin'",
+]
+cloud = [
+    "google-cloud-storage>=2.10",
+]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+]
+notebook = [
+    "jupyter>=1.0",
+    "matplotlib>=3.7",
+]
+stats = [
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+]
+
+[project.scripts]
+dip = "distributed_image_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = ["archive", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "spark: tests that require a local Spark session (deselect with '-m \"not spark\"')",
+    "tf: tests that require TensorFlow (deselect with '-m \"not tf\"')",
+]

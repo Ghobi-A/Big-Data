@@ -1,0 +1,30 @@
+numpy>=1.24
+pandas>=2.0
+pillow>=10.0
+
+[cloud]
+google-cloud-storage>=2.10
+
+[dev]
+pytest>=7.4
+pytest-cov>=4.1
+ruff>=0.4
+
+[notebook]
+jupyter>=1.0
+matplotlib>=3.7
+
+[spark]
+pyspark<4.0,>=3.4
+
+[stats]
+scipy>=1.11
+matplotlib>=3.7
+
+[tensorflow]
+
+[tensorflow:sys_platform != "darwin"]
+tensorflow-cpu<2.20,>=2.13
+
+[tensorflow:sys_platform == "darwin"]
+tensorflow<2.20,>=2.13

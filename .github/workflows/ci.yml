@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package with all local extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[spark,tensorflow,dev,stats]"
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: Pytest with coverage
+        run: pytest --cov=distributed_image_pipeline --cov-report=term-missing
+
+      - name: Generate tiny synthetic dataset for smoke tests
+        run: |
+          python - <<'EOF'
+          import io, random, pathlib
+          from PIL import Image
+          rng = random.Random(0)
+          for cls in ["daisy", "dandelion", "roses", "sunflowers", "tulips"]:
+              d = pathlib.Path("smoke/flowers") / cls
+              d.mkdir(parents=True, exist_ok=True)
+              for i in range(4):
+                  img = Image.new("RGB", (rng.randint(40, 90), rng.randint(40, 90)),
+                                  (rng.randint(0,255), rng.randint(0,255), rng.randint(0,255)))
+                  img.save(d / f"img_{i}.jpg", "JPEG")
+          EOF
+
+      - name: Local preprocessing smoke test
+        run: |
+          python -m distributed_image_pipeline.cli preprocess-local \
+            --input smoke/flowers --output smoke/out-local \
+            --target-size 48 48 --partitions 2
+
+      - name: Local Spark smoke test
+        run: |
+          python -m distributed_image_pipeline.cli preprocess-spark \
+            --input smoke/flowers --output smoke/out-spark \
+            --target-size 48 48 --partitions 2
+
+      - name: Tiny benchmark + report smoke test
+        run: |
+          python -m distributed_image_pipeline.cli benchmark \
+            --input smoke/flowers --output smoke/bench-scratch \
+            --modes local --partitions 1 2 --repeats 2 \
+            --target-size 32 32 \
+            --results smoke/benchmark_runs.csv \
+            --summary smoke/benchmark_summary.csv \
+            --metadata-dir smoke/run_metadata
+          python -m distributed_image_pipeline.cli report \
+            --input smoke/benchmark_runs.csv \
+            --output smoke/benchmark_report.md \
+            --figures-dir smoke/figures
+
+      - name: Tiny TensorFlow training smoke test
+        run: |
+          python -m distributed_image_pipeline.cli train \
+            --jpeg-input smoke/flowers --tfrecord-input smoke/out-local \
+            --epochs 1 --batch-size 4 --target-size 32 32 \
+            --splits-dir smoke/splits --results smoke/training_runs.csv
+
+      - name: Package install check (core only)
+        run: |
+          python -m venv /tmp/venv-core
+          /tmp/venv-core/bin/pip install --quiet .
+          /tmp/venv-core/bin/python -c "import distributed_image_pipeline; from distributed_image_pipeline.config import PipelineConfig; print('core install OK')"

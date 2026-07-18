@@ -1,0 +1,2 @@
+[console_scripts]
+dip = distributed_image_pipeline.cli:main
