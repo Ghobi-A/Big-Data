@@ -39,10 +39,14 @@ jobs:
       - name: Download canonical flowers dataset
         run: |
           mkdir -p data/raw
-          curl --fail --location --retry 3 \
-            https://download.tensorflow.org/example_images/flower_photos.tgz \
+          # Use the Google Cloud Storage endpoint rather than download.tensorflow.org.
+          # The latter can fail certificate verification on GitHub-hosted runners
+          # (curl exit code 60) even though it serves the same canonical archive.
+          curl --fail --location --retry 3 --retry-all-errors \
+            https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz \
             --output /tmp/flower_photos.tgz
           tar -xzf /tmp/flower_photos.tgz -C data/raw
+          test -d data/raw/flower_photos
 
       - name: Build TFRecord dataset
         run: |
