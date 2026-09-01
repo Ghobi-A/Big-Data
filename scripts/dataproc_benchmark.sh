@@ -80,6 +80,7 @@ gcloud dataproc jobs submit pyspark \
   --py-files="${WHEEL_GCS}" \
   "$(dirname "$0")/dataproc_job_entrypoint.py" \
   -- \
+  benchmark \
   --input "${INPUT_URI}" \
   --output "${RESULTS_DIR}/output-${NUM_WORKERS}w" \
   --modes spark \
