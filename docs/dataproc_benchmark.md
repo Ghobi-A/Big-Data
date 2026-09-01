@@ -60,6 +60,12 @@ Each invocation: builds this repo as a wheel, uploads it to
 count, not min/max), submits `benchmark --modes spark --num-workers <n>` as a
 PySpark job via `--py-files`, and deletes the cluster when the job finishes.
 
+For `<n>=1`, the script creates a **single-node** cluster (`--single-node`)
+instead of a standard one, since standard-mode Dataproc clusters reject
+`--num-workers 1` ("Worker configuration must contain two or more workers").
+A single-node cluster runs master and worker on the same VM; only
+`MACHINE_TYPE` sizing applies there, there's no separate worker sizing.
+
 Do this **once per worker count you want to compare** (1, 2, 4 is the
 default plan). Each run is independent, so they don't need to be
 back-to-back, but don't create a cluster and then wait around -- a cluster

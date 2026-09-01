@@ -54,20 +54,38 @@ gsutil cp "${WHEEL}" "${BUCKET}/wheels/"
 WHEEL_GCS="${BUCKET}/wheels/$(basename "${WHEEL}")"
 
 echo "== 2/4: creating cluster ${CLUSTER} (${NUM_WORKERS} x ${MACHINE_TYPE}) =="
-gcloud dataproc clusters create "${CLUSTER}" \
-  --project="${PROJECT}" \
-  --region="${REGION}" \
-  --image-version="${IMAGE_VERSION}" \
-  --master-machine-type="${MACHINE_TYPE}" \
-  --master-boot-disk-type=pd-balanced \
-  --master-boot-disk-size=50 \
-  --num-workers="${NUM_WORKERS}" \
-  --worker-machine-type="${MACHINE_TYPE}" \
-  --worker-boot-disk-type=pd-balanced \
-  --worker-boot-disk-size=50 \
-  --enable-component-gateway \
-  --delete-max-idle="${DELETE_MAX_IDLE}" \
-  --properties="spark:spark.dynamicAllocation.enabled=false"
+if [[ "${NUM_WORKERS}" -eq 1 ]]; then
+  # Standard-mode Dataproc clusters require num-workers >= 2
+  # ("Worker configuration must contain two or more workers"). The 1-node
+  # comparison point uses Dataproc's single-node mode instead: one VM plays
+  # both master and worker, so only master sizing applies.
+  gcloud dataproc clusters create "${CLUSTER}" \
+    --project="${PROJECT}" \
+    --region="${REGION}" \
+    --image-version="${IMAGE_VERSION}" \
+    --single-node \
+    --master-machine-type="${MACHINE_TYPE}" \
+    --master-boot-disk-type=pd-balanced \
+    --master-boot-disk-size=50 \
+    --enable-component-gateway \
+    --delete-max-idle="${DELETE_MAX_IDLE}" \
+    --properties="spark:spark.dynamicAllocation.enabled=false"
+else
+  gcloud dataproc clusters create "${CLUSTER}" \
+    --project="${PROJECT}" \
+    --region="${REGION}" \
+    --image-version="${IMAGE_VERSION}" \
+    --master-machine-type="${MACHINE_TYPE}" \
+    --master-boot-disk-type=pd-balanced \
+    --master-boot-disk-size=50 \
+    --num-workers="${NUM_WORKERS}" \
+    --worker-machine-type="${MACHINE_TYPE}" \
+    --worker-boot-disk-type=pd-balanced \
+    --worker-boot-disk-size=50 \
+    --enable-component-gateway \
+    --delete-max-idle="${DELETE_MAX_IDLE}" \
+    --properties="spark:spark.dynamicAllocation.enabled=false"
+fi
 
 echo "== 3/4: submitting benchmark job =="
 # --py-files installs this repo's package on the cluster; the entrypoint
