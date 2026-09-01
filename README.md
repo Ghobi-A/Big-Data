@@ -150,7 +150,7 @@ export DATAPROC_CLUSTER=your-cluster
 
 Cost estimation never uses hardcoded prices. Hourly prices must be supplied explicitly, and cost outputs are labelled as estimates.
 
-True worker scaling is kept separate from partition scaling. Worker speedup and parallel efficiency should only be reported when actual worker counts are recorded from a distributed cluster experiment.
+True worker scaling is kept separate from partition scaling. Worker speedup and parallel efficiency should only be reported when actual worker counts are recorded from a distributed cluster experiment. See [`docs/dataproc_benchmark.md`](docs/dataproc_benchmark.md) for the procedure to run that experiment on a real, fixed-size Dataproc cluster (`scripts/dataproc_benchmark.sh`) and feed the results back into `reports/tables/benchmark_runs.csv`.
 
 ## Benchmark design
 
