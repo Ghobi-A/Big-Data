@@ -30,3 +30,11 @@ def test_single_node_cost_is_not_double_counted():
 
     assert "BENCHMARK_WORKER_HOURLY_COST=0" in text
     assert '--worker-hourly-cost "${BENCHMARK_WORKER_HOURLY_COST}"' in text
+
+
+def test_default_image_uses_supported_minor_alias_not_expiring_subminor():
+    text = _script_text()
+
+    assert 'IMAGE_VERSION="${IMAGE_VERSION:-2.2-debian12}"' in text
+    assert "2.2.86-debian12" not in text
+    assert "Resolved Dataproc image:" in text
