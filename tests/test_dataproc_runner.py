@@ -1,8 +1,14 @@
 SCRIPT = "scripts/dataproc_benchmark.sh"
+INIT_SCRIPT = "scripts/dataproc_init.sh"
 
 
 def _script_text() -> str:
     with open(SCRIPT, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _init_script_text() -> str:
+    with open(INIT_SCRIPT, encoding="utf-8") as handle:
         return handle.read()
 
 
@@ -38,3 +44,21 @@ def test_default_image_uses_supported_minor_alias_not_expiring_subminor():
     assert 'IMAGE_VERSION="${IMAGE_VERSION:-2.2-debian12}"' in text
     assert "2.2.86-debian12" not in text
     assert "Resolved Dataproc image:" in text
+
+
+def test_bootstrap_uses_dataproc_default_python_environment():
+    text = _init_script_text()
+
+    assert 'DEFAULT_DATAPROC_PYTHON="/opt/conda/default/bin/python"' in text
+    assert 'elif [[ -x "${DEFAULT_DATAPROC_PYTHON}" ]]' in text
+    assert 'PYTHON_BIN="${DEFAULT_DATAPROC_PYTHON}"' in text
+    assert 'PYTHON_BIN="$(command -v python3)"' in text
+    assert 'f"python={sys.executable}"' in text
+
+
+def test_cluster_cleanup_is_armed_before_cluster_creation():
+    text = _script_text()
+
+    armed = text.index("CLUSTER_CREATED=1", text.index("COMMON_CLUSTER_ARGS=("))
+    create = text.index('gcloud dataproc clusters create "${CLUSTER}"', armed)
+    assert armed < create

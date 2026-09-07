@@ -58,8 +58,11 @@ Each invocation performs the full environment lifecycle:
 
 1. Build the repository wheel and upload it to `$BUCKET/wheels/`.
 2. Upload the repository-owned `scripts/dataproc_init.sh` bootstrap to the
-   bucket. The bootstrap installs the pinned TensorFlow runtime plus Pillow,
-   NumPy and pandas on every node.
+   bucket. On Dataproc 2.x, Spark's default Python environment is
+   `/opt/conda/default/bin/python`; the bootstrap installs and verifies the
+   pinned TensorFlow runtime plus Pillow, NumPy and pandas in that environment
+   rather than the Debian OS Python. A `PYTHON_BIN` override remains available
+   for controlled testing outside Dataproc.
 3. Create the Dataproc topology for the requested benchmark point. By default
    the runner requests the maintained `2.2-debian12` image alias, which Google
    maps to the latest supported 2.2 Debian 12 subminor. This avoids hard
@@ -91,11 +94,13 @@ Do this **once per worker count you want to compare** (1, 2, 4 is the
 default plan). Each run is independent, so they do not need to be
 back-to-back.
 
-Cluster deletion is registered as an exit trap, so a failed preflight or
-benchmark job is cleaned up instead of leaving a billable cluster running
-until the idle timeout. For debugging only, set `KEEP_CLUSTER_ON_FAILURE=1`
-to leave a failed cluster in place. `DELETE_MAX_IDLE` still defaults to 30
-minutes as a second safety net.
+Cluster deletion is registered as an exit trap. The cleanup guard is armed
+*before* `gcloud dataproc clusters create`, because Dataproc can allocate a
+cluster and then return a failure when an initialization action fails. The
+trap therefore also attempts to delete partially created or errored clusters,
+in addition to cleaning up failed preflight/benchmark jobs. For debugging
+only, set `KEEP_CLUSTER_ON_FAILURE=1` to leave a failed cluster in place.
+`DELETE_MAX_IDLE` still defaults to 30 minutes as a second safety net.
 
 ### Cost
 
