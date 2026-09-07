@@ -22,7 +22,7 @@ BUCKET="${BUCKET:?set BUCKET to a gs:// bucket you can write to, e.g. gs://my-bu
 REGION="${REGION:-us-central1}"
 CLUSTER="image-pipeline-bench-${NUM_WORKERS}w"
 MACHINE_TYPE="${MACHINE_TYPE:-e2-standard-4}"
-IMAGE_VERSION="${IMAGE_VERSION:-2.2-debian12}"
+IMAGE_VERSION="${IMAGE_VERSION:-2.2.86-debian12}"
 DELETE_MAX_IDLE="${DELETE_MAX_IDLE:-30m}"
 KEEP_CLUSTER_ON_FAILURE="${KEEP_CLUSTER_ON_FAILURE:-0}"
 
