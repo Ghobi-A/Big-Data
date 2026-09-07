@@ -94,6 +94,11 @@ COMMON_CLUSTER_ARGS=(
   --properties="spark:spark.dynamicAllocation.enabled=false"
 )
 
+# Treat cluster creation as potentially allocating resources before gcloud
+# returns. If an initialization action fails, the EXIT trap must still attempt
+# deletion of the errored cluster rather than assuming nothing was created.
+CLUSTER_CREATED=1
+
 if [[ "${NUM_WORKERS}" -eq 1 ]]; then
   # Standard Dataproc clusters require at least two worker VMs. The 1-worker
   # baseline therefore uses Dataproc single-node mode: one VM hosts both the
@@ -112,7 +117,6 @@ else
     --worker-boot-disk-type=pd-balanced \
     --worker-boot-disk-size=50
 fi
-CLUSTER_CREATED=1
 
 RESOLVED_IMAGE_VERSION="$(
   gcloud dataproc clusters describe "${CLUSTER}" \
