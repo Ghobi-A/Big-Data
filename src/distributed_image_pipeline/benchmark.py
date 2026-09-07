@@ -7,6 +7,7 @@ supplied prices) are left null — never fabricated.
 
 from __future__ import annotations
 
+import io
 import logging
 import shutil
 import time
@@ -113,6 +114,34 @@ def _run_output_uri(root: str, suffix: str) -> str:
     return str(Path(root) / suffix)
 
 
+def _write_results_csv(df: pd.DataFrame, results_csv: str) -> None:
+    """Append benchmark rows to a local CSV or persist them to GCS.
+
+    Cloud Storage objects do not have normal append semantics. Result tables
+    are tiny, so a GCS update reads the existing CSV (if any), concatenates the
+    new rows, and rewrites the object through TensorFlow's GFile interface.
+    """
+    if results_csv.startswith("gs://"):
+        import tensorflow as tf
+
+        frames = []
+        if tf.io.gfile.exists(results_csv):
+            with tf.io.gfile.GFile(results_csv, "r") as handle:
+                existing_text = handle.read()
+            if existing_text.strip():
+                frames.append(pd.read_csv(io.StringIO(existing_text)))
+        frames.append(df)
+        combined = pd.concat(frames, ignore_index=True)
+        with tf.io.gfile.GFile(results_csv, "w") as handle:
+            combined.to_csv(handle, index=False)
+        return
+
+    results_path = Path(results_csv)
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    header = not results_path.exists()
+    df.to_csv(results_path, mode="a", header=header, index=False)
+
+
 def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
     """Execute the benchmark grid and append rows to ``plan.results_csv``."""
     cluster_cost = None
@@ -193,10 +222,7 @@ def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
                             shutil.rmtree(local_out, ignore_errors=True)
 
     df = pd.DataFrame(rows, columns=RUN_COLUMNS)
-    results_path = Path(plan.results_csv)
-    results_path.parent.mkdir(parents=True, exist_ok=True)
-    header = not results_path.exists()
-    df.to_csv(results_path, mode="a", header=header, index=False)
+    _write_results_csv(df, plan.results_csv)
     return df
 
 

@@ -54,19 +54,29 @@ export REGION=us-central1   # match your bucket's region if it's not multi-regio
 ./scripts/dataproc_benchmark.sh 1   # then 2, then 4
 ```
 
-Each invocation: builds this repo as a wheel, uploads it to
-`$BUCKET/wheels/`, creates a cluster named `image-pipeline-bench-<n>w` with
-`<n>` fixed workers (autoscaling is off -- `--num-workers` is a static
-count, not min/max), submits `benchmark --modes spark --num-workers <n>` as a
-PySpark job via `--py-files`, and deletes the cluster when the job finishes.
+Each invocation now performs the full environment lifecycle:
+
+1. Build the repository wheel and upload it to `$BUCKET/wheels/`.
+2. Upload the repository-owned `scripts/dataproc_init.sh` bootstrap to the
+   bucket. The bootstrap installs the pinned TensorFlow runtime plus Pillow,
+   NumPy and pandas on every node.
+3. Create a fixed-size Dataproc cluster. The default image is pinned to
+   `2.2.86-debian12`; override `IMAGE_VERSION` explicitly if you intentionally
+   want another image.
+4. Run `scripts/dataproc_runtime_check.py` to verify imports on the Spark
+   driver and executors before the benchmark grid starts.
+5. Submit `benchmark --modes spark --num-workers <n>` through `--py-files`,
+   persist the result CSV to GCS, and delete the cluster.
 
 Do this **once per worker count you want to compare** (1, 2, 4 is the
-default plan). Each run is independent, so they don't need to be
-back-to-back, but don't create a cluster and then wait around -- a cluster
-that sits idle for `DELETE_MAX_IDLE` (default 30 minutes) auto-deletes
-itself as a cost safety net, which is a good thing to have, but the job
-should still be submitted right after cluster creation finishes, not left
-for later.
+default plan). Each run is independent, so they do not need to be
+back-to-back.
+
+Cluster deletion is registered as an exit trap, so a failed preflight or
+benchmark job is cleaned up instead of leaving a billable cluster running
+until the idle timeout. For debugging only, set `KEEP_CLUSTER_ON_FAILURE=1`
+to leave a failed cluster in place. `DELETE_MAX_IDLE` still defaults to 30
+minutes as a second safety net.
 
 ### Cost
 
@@ -74,16 +84,18 @@ Default machine type is `e2-standard-4` (4 vCPU, 16 GB) for both master and
 workers -- enough for image preprocessing, an order of magnitude cheaper
 than the Console's oversized 16-vCPU default. At published US on-demand
 pricing this is roughly $0.13-0.15/hr per node, so a 4-worker run (5 nodes
-total including master) is on the order of $0.70/hr, and each benchmark run
-should only take a few minutes end to end. Override `MACHINE_TYPE`,
+total including master) is on the order of $0.70/hr. Override `MACHINE_TYPE`,
 `WORKER_HOURLY_COST`, `MASTER_HOURLY_COST` as env vars if you use a
 different shape or region.
 
 ## Bring the results back into the repo
 
-Each run writes its CSV to `$BUCKET/dataproc-benchmark-results/`. Pull each
-one down and merge its rows into the repo's own results file (they share the
-same `RUN_COLUMNS` schema from `benchmark.py`):
+Each run writes its CSV to `$BUCKET/dataproc-benchmark-results/`. The
+benchmark writer handles `gs://` paths directly, so the CSV survives cluster
+teardown rather than being written to the master's local filesystem.
+
+Pull each file down and merge its rows into the repo's own results file (they
+share the same `RUN_COLUMNS` schema from `benchmark.py`):
 
 ```bash
 gsutil cp gs://your-bucket/dataproc-benchmark-results/benchmark_runs_1w.csv .
