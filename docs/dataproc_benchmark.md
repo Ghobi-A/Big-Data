@@ -60,13 +60,27 @@ Each invocation now performs the full environment lifecycle:
 2. Upload the repository-owned `scripts/dataproc_init.sh` bootstrap to the
    bucket. The bootstrap installs the pinned TensorFlow runtime plus Pillow,
    NumPy and pandas on every node.
-3. Create a fixed-size Dataproc cluster. The default image is pinned to
-   `2.2.86-debian12`; override `IMAGE_VERSION` explicitly if you intentionally
-   want another image.
+3. Create the Dataproc topology for the requested benchmark point. The default
+   image is pinned to `2.2.86-debian12`; override `IMAGE_VERSION` explicitly
+   if you intentionally want another image.
 4. Run `scripts/dataproc_runtime_check.py` to verify imports on the Spark
    driver and executors before the benchmark grid starts.
 5. Submit `benchmark --modes spark --num-workers <n>` through `--py-files`,
    persist the result CSV to GCS, and delete the cluster.
+
+### 1-worker baseline versus 2/4-worker clusters
+
+Dataproc standard-mode clusters require at least two worker VMs, so the
+`1` benchmark point cannot be created with `--num-workers=1`. The runner uses
+Dataproc **single-node mode** for that baseline: one `e2-standard-4` VM hosts
+both master and worker roles. The benchmark metadata still records
+`workers=1`, which is the correct scaling baseline, but cost estimation charges
+only that one VM rather than double-counting it as a master plus a worker.
+
+The `2` and `4` benchmark points use normal Dataproc clusters with one master
+plus the requested number of worker VMs. All topologies share the same pinned
+image, initialization action, runtime preflight, Spark configuration, and
+benchmark command.
 
 Do this **once per worker count you want to compare** (1, 2, 4 is the
 default plan). Each run is independent, so they do not need to be
@@ -80,13 +94,11 @@ minutes as a second safety net.
 
 ### Cost
 
-Default machine type is `e2-standard-4` (4 vCPU, 16 GB) for both master and
-workers -- enough for image preprocessing, an order of magnitude cheaper
-than the Console's oversized 16-vCPU default. At published US on-demand
-pricing this is roughly $0.13-0.15/hr per node, so a 4-worker run (5 nodes
-total including master) is on the order of $0.70/hr. Override `MACHINE_TYPE`,
-`WORKER_HOURLY_COST`, `MASTER_HOURLY_COST` as env vars if you use a
-different shape or region.
+Default machine type is `e2-standard-4` (4 vCPU, 16 GB). The 1-worker baseline
+is one single-node VM. The 2-worker and 4-worker points use one master plus
+two or four workers respectively. Override `MACHINE_TYPE`,
+`WORKER_HOURLY_COST`, and `MASTER_HOURLY_COST` as environment variables if
+you use a different shape or region.
 
 ## Bring the results back into the repo
 
