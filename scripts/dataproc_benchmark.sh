@@ -31,6 +31,7 @@ KEEP_CLUSTER_ON_FAILURE="${KEEP_CLUSTER_ON_FAILURE:-0}"
 # different machine type or region.
 WORKER_HOURLY_COST="${WORKER_HOURLY_COST:-0.134}"
 MASTER_HOURLY_COST="${MASTER_HOURLY_COST:-0.134}"
+BENCHMARK_WORKER_HOURLY_COST="${WORKER_HOURLY_COST}"
 
 INPUT_URI="${INPUT_URI:-gs://flowers-public/*/*.jpg}"
 RESULTS_DIR="${BUCKET}/dataproc-benchmark-results"
@@ -73,23 +74,39 @@ WHEEL_GCS="${BUCKET}/wheels/$(basename "${WHEEL}")"
 echo "== 2/5: uploading pinned Dataproc bootstrap =="
 gsutil cp "${SCRIPT_DIR}/dataproc_init.sh" "${INIT_GCS}"
 
-echo "== 3/5: creating cluster ${CLUSTER} (${NUM_WORKERS} x ${MACHINE_TYPE}) =="
-gcloud dataproc clusters create "${CLUSTER}" \
-  --project="${PROJECT}" \
-  --region="${REGION}" \
-  --image-version="${IMAGE_VERSION}" \
-  --master-machine-type="${MACHINE_TYPE}" \
-  --master-boot-disk-type=pd-balanced \
-  --master-boot-disk-size=50 \
-  --num-workers="${NUM_WORKERS}" \
-  --worker-machine-type="${MACHINE_TYPE}" \
-  --worker-boot-disk-type=pd-balanced \
-  --worker-boot-disk-size=50 \
-  --enable-component-gateway \
-  --delete-max-idle="${DELETE_MAX_IDLE}" \
-  --initialization-actions="${INIT_GCS}" \
-  --initialization-action-timeout=15m \
+echo "== 3/5: creating cluster ${CLUSTER} (${NUM_WORKERS} benchmark worker(s), ${MACHINE_TYPE}) =="
+COMMON_CLUSTER_ARGS=(
+  --project="${PROJECT}"
+  --region="${REGION}"
+  --image-version="${IMAGE_VERSION}"
+  --master-machine-type="${MACHINE_TYPE}"
+  --master-boot-disk-type=pd-balanced
+  --master-boot-disk-size=50
+  --enable-component-gateway
+  --delete-max-idle="${DELETE_MAX_IDLE}"
+  --initialization-actions="${INIT_GCS}"
+  --initialization-action-timeout=15m
   --properties="spark:spark.dynamicAllocation.enabled=false"
+)
+
+if [[ "${NUM_WORKERS}" -eq 1 ]]; then
+  # Standard Dataproc clusters require at least two worker VMs. The 1-worker
+  # baseline therefore uses Dataproc single-node mode: one VM hosts both the
+  # master and worker roles. Keep workers=1 in benchmark metadata for scaling,
+  # but charge only the master/node price to avoid double-counting that VM.
+  echo "Using Dataproc single-node mode for the 1-worker baseline."
+  BENCHMARK_WORKER_HOURLY_COST=0
+  gcloud dataproc clusters create "${CLUSTER}" \
+    "${COMMON_CLUSTER_ARGS[@]}" \
+    --single-node
+else
+  gcloud dataproc clusters create "${CLUSTER}" \
+    "${COMMON_CLUSTER_ARGS[@]}" \
+    --num-workers="${NUM_WORKERS}" \
+    --worker-machine-type="${MACHINE_TYPE}" \
+    --worker-boot-disk-type=pd-balanced \
+    --worker-boot-disk-size=50
+fi
 CLUSTER_CREATED=1
 
 echo "== 4/5: validating runtime and running benchmark =="
@@ -117,7 +134,7 @@ gcloud dataproc jobs submit pyspark \
   --partitions 8 16 \
   --repeats 3 \
   --num-workers "${NUM_WORKERS}" \
-  --worker-hourly-cost "${WORKER_HOURLY_COST}" \
+  --worker-hourly-cost "${BENCHMARK_WORKER_HOURLY_COST}" \
   --master-hourly-cost "${MASTER_HOURLY_COST}" \
   --results "${RESULTS_DIR}/benchmark_runs_${NUM_WORKERS}w.csv"
 
