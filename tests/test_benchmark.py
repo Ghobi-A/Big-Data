@@ -1,13 +1,17 @@
+import io
+
 import pytest
 
 pytest.importorskip("tensorflow")
 pytestmark = pytest.mark.tf
 
 import pandas as pd  # noqa: E402
+import tensorflow as tf  # noqa: E402
 
 from distributed_image_pipeline.benchmark import (  # noqa: E402
     RUN_COLUMNS,
     BenchmarkPlan,
+    _write_results_csv,
     estimate_run_cost,
     run_benchmark,
     run_io_benchmark,
@@ -77,6 +81,33 @@ def test_run_benchmark_appends(flowers_dir, tmp_path):
     run_benchmark(BenchmarkPlan(**kwargs))
     run_benchmark(BenchmarkPlan(**kwargs))
     assert len(pd.read_csv(kwargs["results_csv"])) == 2
+
+
+def test_write_results_csv_gcs_appends(monkeypatch):
+    store: dict[str, str] = {}
+
+    class FakeGFile(io.StringIO):
+        def __init__(self, path: str, mode: str):
+            self.path = path
+            self.mode = mode
+            super().__init__(store.get(path, "") if "r" in mode else "")
+
+        def __exit__(self, exc_type, exc, tb):
+            if exc_type is None and "w" in self.mode:
+                store[self.path] = self.getvalue()
+            self.close()
+            return False
+
+    monkeypatch.setattr(tf.io.gfile, "exists", lambda path: path in store)
+    monkeypatch.setattr(tf.io.gfile, "GFile", FakeGFile)
+
+    uri = "gs://benchmark-bucket/results.csv"
+    _write_results_csv(pd.DataFrame([{"run_id": "first", "value": 1}]), uri)
+    _write_results_csv(pd.DataFrame([{"run_id": "second", "value": 2}]), uri)
+
+    persisted = pd.read_csv(io.StringIO(store[uri]))
+    assert persisted["run_id"].tolist() == ["first", "second"]
+    assert persisted["value"].tolist() == [1, 2]
 
 
 def test_sampled_benchmark_labelled(flowers_dir, tmp_path):
