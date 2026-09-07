@@ -54,15 +54,20 @@ export REGION=us-central1   # match your bucket's region if it's not multi-regio
 ./scripts/dataproc_benchmark.sh 1   # then 2, then 4
 ```
 
-Each invocation now performs the full environment lifecycle:
+Each invocation performs the full environment lifecycle:
 
 1. Build the repository wheel and upload it to `$BUCKET/wheels/`.
 2. Upload the repository-owned `scripts/dataproc_init.sh` bootstrap to the
    bucket. The bootstrap installs the pinned TensorFlow runtime plus Pillow,
    NumPy and pandas on every node.
-3. Create the Dataproc topology for the requested benchmark point. The default
-   image is pinned to `2.2.86-debian12`; override `IMAGE_VERSION` explicitly
-   if you intentionally want another image.
+3. Create the Dataproc topology for the requested benchmark point. By default
+   the runner requests the maintained `2.2-debian12` image alias, which Google
+   maps to the latest supported 2.2 Debian 12 subminor. This avoids hard
+   failures when an exact subminor is retired from new-cluster creation. Set
+   `IMAGE_VERSION` explicitly only when you intentionally want to pin a
+   specific image for a controlled reproduction. The runner prints the
+   resolved image version after cluster creation so the exact environment is
+   still recorded in the benchmark logs.
 4. Run `scripts/dataproc_runtime_check.py` to verify imports on the Spark
    driver and executors before the benchmark grid starts.
 5. Submit `benchmark --modes spark --num-workers <n>` through `--py-files`,
@@ -78,8 +83,8 @@ both master and worker roles. The benchmark metadata still records
 only that one VM rather than double-counting it as a master plus a worker.
 
 The `2` and `4` benchmark points use normal Dataproc clusters with one master
-plus the requested number of worker VMs. All topologies share the same pinned
-image, initialization action, runtime preflight, Spark configuration, and
+plus the requested number of worker VMs. All topologies share the same image
+selection, initialization action, runtime preflight, Spark configuration, and
 benchmark command.
 
 Do this **once per worker count you want to compare** (1, 2, 4 is the
