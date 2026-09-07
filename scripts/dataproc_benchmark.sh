@@ -22,7 +22,11 @@ BUCKET="${BUCKET:?set BUCKET to a gs:// bucket you can write to, e.g. gs://my-bu
 REGION="${REGION:-us-central1}"
 CLUSTER="image-pipeline-bench-${NUM_WORKERS}w"
 MACHINE_TYPE="${MACHINE_TYPE:-e2-standard-4}"
-IMAGE_VERSION="${IMAGE_VERSION:-2.2.86-debian12}"
+# Use the maintained 2.2 Debian 12 family alias by default. Google can retire
+# exact subminor images from new-cluster creation; the alias tracks the latest
+# supported 2.2 subminor. Override IMAGE_VERSION to pin an exact image when a
+# controlled reproduction specifically requires it.
+IMAGE_VERSION="${IMAGE_VERSION:-2.2-debian12}"
 DELETE_MAX_IDLE="${DELETE_MAX_IDLE:-30m}"
 KEEP_CLUSTER_ON_FAILURE="${KEEP_CLUSTER_ON_FAILURE:-0}"
 
@@ -75,6 +79,7 @@ echo "== 2/5: uploading pinned Dataproc bootstrap =="
 gsutil cp "${SCRIPT_DIR}/dataproc_init.sh" "${INIT_GCS}"
 
 echo "== 3/5: creating cluster ${CLUSTER} (${NUM_WORKERS} benchmark worker(s), ${MACHINE_TYPE}) =="
+echo "Requested Dataproc image: ${IMAGE_VERSION}"
 COMMON_CLUSTER_ARGS=(
   --project="${PROJECT}"
   --region="${REGION}"
@@ -108,6 +113,14 @@ else
     --worker-boot-disk-size=50
 fi
 CLUSTER_CREATED=1
+
+RESOLVED_IMAGE_VERSION="$(
+  gcloud dataproc clusters describe "${CLUSTER}" \
+    --project="${PROJECT}" \
+    --region="${REGION}" \
+    --format='value(config.softwareConfig.imageVersion)' 2>/dev/null || true
+)"
+echo "Resolved Dataproc image: ${RESOLVED_IMAGE_VERSION:-unknown}"
 
 echo "== 4/5: validating runtime and running benchmark =="
 # Fail before the expensive benchmark grid if TensorFlow/Pillow/etc. cannot be
