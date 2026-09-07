@@ -203,7 +203,7 @@ def run_benchmark(plan: BenchmarkPlan) -> pd.DataFrame:
                         "repeat": repeat,
                         "runtime_seconds": result.runtime_seconds,
                         "throughput_images_per_second": result.throughput_images_per_second,
-                        "output_files": len(result.output_paths),
+                        "output_files": result.output_files,
                         "output_size_mb": result.output_size_mb,
                         "estimated_cost": est_cost,
                         "estimated_cost_per_1k_images": est_cost_1k,
